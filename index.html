@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dirty Burgers</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+
+<style>
+:root{
+  --bg:#0f172a;
+  --card:#1e293b;
+  --text:#f1f5f9;
+  --muted:#94a3b8;
+  --accent:#22d3ee;
+  --danger:#ef4444;
+}
+
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+}
+
+/* HEADER */
+.app-header{
+  padding:16px;
+  border-bottom:2px solid var(--accent);
+  background:#0f172a;
+  text-align:center;
+}
+
+.app-logo{ height:40px; }
+
+/* LAYOUT */
+.app-body{
+  display:flex;
+  align-items:flex-start;
+}
+
+/* SIDEBAR */
+.sidebar{
+  width:260px;
+  background:var(--card);
+  padding:20px;
+  border-right:2px solid var(--accent);
+  position:sticky;
+  top:0;
+  height:100vh;
+  overflow-y:auto;
+}
+
+.sidebar h3{ margin-top:0; }
+
+.sidebar label{
+  font-size:13px;
+  color:var(--muted);
+  display:block;
+  margin-top:14px;
+}
+
+.sidebar input,
+.sidebar select{
+  width:100%;
+  padding:10px;
+  border-radius:10px;
+  border:none;
+  background:#0f172a;
+  color:var(--text);
+  margin-top:6px;
+}
+
+/* RESULTS */
+.results-area{
+  flex:1;
+  padding:10px 20px;
+}
+
+/* CARDS */
+.card{
+  background:var(--card);
+  padding:15px;
+  margin:12px 0;
+  border-radius:14px;
+}
+
+.card-inner{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.name{font-weight:700;}
+.meta{font-size:13px;color:var(--muted);}
+.small{font-size:12px;margin-top:4px;color:var(--muted);}
+.rating-img{width:110px;}
+
+#noResults{
+  text-align:center;
+  padding:20px;
+  color:var(--danger);
+  display:none;
+}
+
+.radius-note{
+  text-align:center;
+  font-size:13px;
+  color:var(--muted);
+  padding:8px 0;
+}
+
+/* MOBILE */
+@media(max-width:900px){
+  .app-body{ flex-direction:column; }
+  .sidebar{
+    width:100%;
+    height:auto;
+    position:relative;
+    border-right:none;
+    border-bottom:2px solid var(--accent);
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header class="app-header">
+  <img src="images/logo.png" class="app-logo">
+  <h1>Dirty Burgers</h1>
+</header>
+
+<div class="radius-note">
+  Showing establishments within 10 miles of your location
+</div>
+
+<div class="app-body">
+
+  <aside class="sidebar">
+    <h3>Search & Filters</h3>
+
+    <label>Search</label>
+    <input type="text" id="textFilter"
+           placeholder="Filter establishments...">
+
+    <label>Rating</label>
+    <select id="ratingFilter">
+      <option value="all">All Ratings</option>
+      <option value="0">0</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+    </select>
+
+    <label>Business Type</label>
+    <select id="businessFilter">
+      <option value="all">All Business Types</option>
+    </select>
+
+    <label>Sort By</label>
+    <select id="sortSelect">
+      <option value="distance">Distance</option>
+      <option value="rating">Rating</option>
+    </select>
+  </aside>
+
+  <main class="results-area">
+    <div id="noResults">🚫 No establishments found</div>
+    <div id="results"></div>
+  </main>
+
+</div>
+
+<script>
+const textFilter = document.getElementById("textFilter");
+const ratingFilter = document.getElementById("ratingFilter");
+const businessFilter = document.getElementById("businessFilter");
+const sortSelect = document.getElementById("sortSelect");
+const resultsEl = document.getElementById("results");
+const noResults = document.getElementById("noResults");
+
+let userLat = null;
+let userLon = null;
+let allEstablishments = [];
+const SEARCH_RADIUS = 10;
+
+/* GEOLOCATION */
+navigator.geolocation.getCurrentPosition(position=>{
+  userLat = position.coords.latitude;
+  userLon = position.coords.longitude;
+  fetchData();
+});
+
+/* DISTANCE */
+function calcDistance(lat1, lon1, lat2, lon2){
+  const R = 3958.8;
+  const dLat = (lat2-lat1)*Math.PI/180;
+  const dLon = (lon2-lon1)*Math.PI/180;
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180) *
+    Math.cos(lat2*Math.PI/180) *
+    Math.sin(dLon/2)**2;
+  const c = 2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return +(R*c).toFixed(2);
+}
+
+/* BADGE KEY */
+function getRatingKey(v){
+  return `fhrs_${v}_en-gb`;
+}
+
+/* FETCH DATA */
+async function fetchData(){
+  const res = await fetch(
+    `https://api.ratings.food.gov.uk/Establishments?latitude=${userLat}&longitude=${userLon}&maxDistanceLimit=${SEARCH_RADIUS}&pageSize=100`,
+    { headers:{"x-api-version":"2"} }
+  );
+  const data = await res.json();
+
+  allEstablishments = data.establishments.map(e=>{
+    return {
+      ...e,
+      distance: e.geocode?.latitude
+        ? calcDistance(userLat,userLon,e.geocode.latitude,e.geocode.longitude)
+        : null
+    };
+  });
+
+  populateBusinessTypes();
+  applyFilters();
+}
+
+/* FILTERS */
+function populateBusinessTypes(){
+  const types = [...new Set(allEstablishments.map(e=>e.BusinessType))]
+    .filter(Boolean).sort();
+
+  businessFilter.innerHTML =
+    `<option value="all">All Business Types</option>`;
+
+  types.forEach(t=>{
+    const opt=document.createElement("option");
+    opt.value=t;
+    opt.textContent=t;
+    businessFilter.appendChild(opt);
+  });
+}
+
+function applyFilters(){
+  let filtered=[...allEstablishments];
+
+  const query=textFilter.value.trim().toLowerCase();
+  if(query){
+    filtered=filtered.filter(e=>
+      e.BusinessName &&
+      e.BusinessName.toLowerCase().includes(query)
+    );
+  }
+
+  /* FIXED RATING FILTER */
+  if(ratingFilter.value!=="all"){
+    filtered=filtered.filter(e=>{
+      const rating=Number(e.RatingValue);
+      return !isNaN(rating) &&
+             rating===Number(ratingFilter.value);
+    });
+  }
+
+  if(businessFilter.value!=="all"){
+    filtered=filtered.filter(e=>
+      e.BusinessType===businessFilter.value
+    );
+  }
+
+  if(sortSelect.value==="rating"){
+    filtered.sort((a,b)=>
+      Number(b.RatingValue||0) -
+      Number(a.RatingValue||0)
+    );
+  } else {
+    filtered.sort((a,b)=>{
+      if(a.distance==null) return 1;
+      if(b.distance==null) return -1;
+      return a.distance-b.distance;
+    });
+  }
+
+  display(filtered);
+}
+
+textFilter.addEventListener("input",applyFilters);
+ratingFilter.addEventListener("change",applyFilters);
+businessFilter.addEventListener("change",applyFilters);
+sortSelect.addEventListener("change",applyFilters);
+
+/* DISPLAY */
+function display(list){
+  resultsEl.innerHTML="";
+  if(!list.length){
+    noResults.style.display="block";
+    return;
+  }
+  noResults.style.display="none";
+
+  list.forEach(e=>{
+    const address=[
+      e.AddressLine1,
+      e.AddressLine2,
+      e.PostCode
+    ].filter(Boolean).join(", ");
+
+    const distText =
+      e.distance != null
+        ? `${e.distance} miles`
+        : "Distance unavailable";
+
+    const numericRating = Number(e.RatingValue);
+    const badgeSrc = !isNaN(numericRating)
+      ? `images/${getRatingKey(e.RatingValue)}.svg`
+      : `images/fhrs_exempt_en-gb.svg`;
+
+    resultsEl.innerHTML+=`
+      <div class="card">
+        <div class="card-inner">
+          <div>
+            <div class="name">${e.BusinessName}</div>
+            <div class="meta">${address}</div>
+            <div class="meta">${distText} • ${e.BusinessType}</div>
+            <div class="small">🗓 ${e.RatingDate || "Unknown"}</div>
+          </div>
+
+          <img class="rating-img"
+               src="${badgeSrc}"
+               alt="Rating ${e.RatingValue}">
+        </div>
+      </div>
+    `;
+  });
+}
+</script>
+
+</body>
+</html>
